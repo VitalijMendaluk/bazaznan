@@ -671,6 +671,8 @@ const FALLBACK = `[H]Відмінне питання![/H]
 // ─────────────────────────────────────────────
 //  GEMINI API
 // ─────────────────────────────────────────────
+const GEMINI_API_KEY = 'AQ.Ab8RN6KWF70GUsOwn68Odk63A4kyJHxISnNKViGe5UyL7qYQBw';
+const GEMINI_MODELS  = ['gemini-1.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash-latest'];
 
 const SYSTEM_PROMPT = `Ти — AI-наставник Віталік, експерт з TikTok маркетингу з 10+ роками досвіду.
 Допомагаєш будувати успішні TikTok акаунти. Відповідаєш ТІЛЬКИ українською мовою.
@@ -704,20 +706,19 @@ async function getAIResponse(userText) {
     generationConfig: { temperature: 0.65, maxOutputTokens: 1024 }
   };
 
-  const res = await fetch('/api/chat', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
-  });
-
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error?.message || `Помилка API: ${res.status}`);
+  let text = null;
+  let lastErr = null;
+  for (const model of GEMINI_MODELS) {
+    try {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`;
+      const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      if (!res.ok) { const e = await res.json().catch(()=>({})); throw new Error(e.error?.message || `HTTP ${res.status}`); }
+      const data = await res.json();
+      text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (text) break;
+    } catch(e) { lastErr = e; }
   }
-
-  const data = await res.json();
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) throw new Error('Пуста відповідь від Gemini');
+  if (!text) throw new Error(lastErr?.message || 'Помилка Gemini API');
 
   // Тільки тут оновлюємо history — якщо все пройшло успішно
   history.push(newEntry);
