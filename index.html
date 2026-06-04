@@ -669,10 +669,11 @@ const FALLBACK = `[H]Відмінне питання![/H]
 Спробуй запитати про будь-яку з цих тем, або натисни на один з підказів нижче 👇`;
 
 // ─────────────────────────────────────────────
-//  GEMINI API
+//  GROQ API (безкоштовно, 14400 запитів/день)
+//  Ключ: console.groq.com → API Keys → Create
 // ─────────────────────────────────────────────
-const GEMINI_API_KEY = 'AQ.Ab8RN6K19XHrJpQK7vPvdcWHKIIwpOmg6ALQnBbIJ0Qs7VI-Rw';
-const GEMINI_MODELS  = ['gemini-2.0-flash-lite', 'gemini-2.0-flash', 'gemini-1.5-flash-8b', 'gemini-1.5-flash'];
+const GROQ_API_KEY = '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';
+const GROQ_MODEL   = 'llama-3.3-70b-versatile';
 
 const SYSTEM_PROMPT = `Ти — AI-наставник Віталік, експерт з TikTok маркетингу з 10+ роками досвіду.
 Допомагаєш будувати успішні TikTok акаунти. Відповідаєш ТІЛЬКИ українською мовою.
@@ -696,33 +697,38 @@ function buildKB() {
 const history = [];
 
 async function getAIResponse(userText) {
-  // Додаємо до history тільки після успіху
-  const newEntry = { role: 'user', parts: [{ text: userText }] };
-  const snapshot = [...history, newEntry];
+  history.push({ role: 'user', content: userText });
 
-  const body = {
-    system_instruction: { parts: [{ text: SYSTEM_PROMPT }] },
-    contents: snapshot,
-    generationConfig: { temperature: 0.65, maxOutputTokens: 1024 }
-  };
+  const messages = [
+    { role: 'system', content: SYSTEM_PROMPT },
+    ...history
+  ];
 
-  let text = null;
-  let lastErr = null;
-  for (const model of GEMINI_MODELS) {
-    try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
-      const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': GEMINI_API_KEY }, body: JSON.stringify(body) });
-      if (!res.ok) { const e = await res.json().catch(()=>({})); throw new Error(e.error?.message || `HTTP ${res.status}`); }
-      const data = await res.json();
-      text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (text) break;
-    } catch(e) { lastErr = e; }
+  const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${GROQ_API_KEY}`
+    },
+    body: JSON.stringify({
+      model: GROQ_MODEL,
+      messages,
+      temperature: 0.65,
+      max_tokens: 1024
+    })
+  });
+
+  if (!res.ok) {
+    history.pop(); // відкочуємо якщо помилка
+    const e = await res.json().catch(() => ({}));
+    throw new Error(e.error?.message || `HTTP ${res.status}`);
   }
-  if (!text) throw new Error(lastErr?.message || 'Помилка Gemini API');
 
-  // Тільки тут оновлюємо history — якщо все пройшло успішно
-  history.push(newEntry);
-  history.push({ role: 'model', parts: [{ text }] });
+  const data = await res.json();
+  const text = data.choices?.[0]?.message?.content;
+  if (!text) { history.pop(); throw new Error('Пуста відповідь від AI'); }
+
+  history.push({ role: 'assistant', content: text });
   return text;
 }
 
