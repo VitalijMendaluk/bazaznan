@@ -673,7 +673,7 @@ const FALLBACK = `[H]Відмінне питання![/H]
 //  Ключ: console.groq.com → API Keys → Create
 // ─────────────────────────────────────────────
 const GROQ_API_KEY = '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';
-const GROQ_MODEL   = 'llama-3.3-70b-versatile';
+const GROQ_MODEL   = 'llama-3.1-8b-instant';
 
 const SYSTEM_PROMPT = `Ти — AI-наставник Віталік, експерт з TikTok маркетингу з 10+ роками досвіду.
 Допомагаєш будувати успішні TikTok акаунти. Відповідаєш ТІЛЬКИ українською мовою.
@@ -682,17 +682,11 @@ const SYSTEM_PROMPT = `Ти — AI-наставник Віталік, експе
 - Коротко і конкретно. Без "води" і загальних фраз.
 - Використовуй емодзі на початку кожного пункту.
 - Звертайся на "ти", будь дружнім наставником.
-- Заголовки: [H]ТЕКСТ[/H]. НЕ використовуй ### або ***.
+- Заголовки виділяй жирним через **ТЕКСТ**. НЕ використовуй ### або [H].
 - Розділяй думки новими рядками.
-- Давай дієві поради, які можна застосувати одразу.
-- ВАЖЛИВО: НЕ вітайся ("Привіт", "Вітаю" тощо) у кожному повідомленні. Починай одразу з відповіді по суті.
+- Давай дієві поради, які можна застосувати СЬОГОДНІ.
+- НЕ вітайся у кожному повідомленні. Починай одразу з відповіді по суті.`;
 
-БАЗА ЗНАНЬ ПРО TIKTOK:
-${buildKB()}`;
-
-function buildKB() {
-  return KB.map(item => item.title + '\n' + item.answer.replace(/\[H\]|\[\/H\]/gi, '')).join('\n\n');
-}
 
 const history = [];
 
@@ -706,6 +700,7 @@ async function getAIResponse(userText) {
 
   const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
+    mode: 'cors',
     headers: {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${GROQ_API_KEY}`
@@ -719,7 +714,7 @@ async function getAIResponse(userText) {
   });
 
   if (!res.ok) {
-    history.pop(); // відкочуємо якщо помилка
+    history.pop();
     const e = await res.json().catch(() => ({}));
     throw new Error(e.error?.message || `HTTP ${res.status}`);
   }
@@ -732,15 +727,32 @@ async function getAIResponse(userText) {
   return text;
 }
 
-// Локальний пошук як резервний варіант
+// Локальний пошук — підтримує відмінювання через стеми
 function findLocal(q) {
-  const low = q.toLowerCase().replace(/ї/g,'і').replace(/є/g,'е').replace(/ґ/g,'г');
+  const norm = s => s.toLowerCase()
+    .replace(/ї/g,'і').replace(/є/g,'е').replace(/ґ/g,'г')
+    .replace(/[?!.,;]/g,'');
+  const low = norm(q);
+  // слова запиту для порівняння стемів
+  const words = low.split(/\s+/);
+
   let best = null, bestScore = 0;
   for (const item of KB) {
     let score = 0;
     for (const kw of item.keys) {
-      const k = kw.toLowerCase().replace(/ї/g,'і').replace(/є/g,'е').replace(/ґ/g,'г');
-      if (low.includes(k)) score += k.length;
+      const k = norm(kw);
+      // Точний збіг
+      if (low.includes(k)) { score += k.length * 2; continue; }
+      // Стем-збіг: перші 4+ символи ключового слова співпадають з початком будь-якого слова запиту
+      if (k.length >= 4) {
+        const stem = k.slice(0, Math.max(4, k.length - 2));
+        for (const w of words) {
+          if (w.startsWith(stem) || w.length >= 4 && k.startsWith(w.slice(0,4))) {
+            score += stem.length;
+            break;
+          }
+        }
+      }
     }
     if (score > bestScore) { bestScore = score; best = item; }
   }
@@ -824,16 +836,25 @@ function formatAI(text) {
     .split('\n')
     .map(line => {
       const t = line.trim();
-      if (!t) return '<div style="height:3px"></div>';
+      if (!t) return '<div style="height:4px"></div>';
+      // Старий формат [H]...[/H]
       const headerMatch = t.match(/^\[H\](.*?)\[\/H\]$/i);
-      if (headerMatch) return '<h3>' + headerMatch[1].replace(/&/g,'&amp;') + '</h3>';
-      const clean = t
-        .replace(/\*\*(.*?)\*\*/g, '$1')
-        .replace(/\*(.*?)\*/g, '$1')
-        .replace(/^[\*\-]\s+/, '');
-      return '<p>' + clean.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</p>';
+      if (headerMatch) return '<h3>' + esc(headerMatch[1]) + '</h3>';
+      // Рядок що починається з ## або ###
+      const mdHeader = t.match(/^#{1,3}\s+(.+)/);
+      if (mdHeader) return '<h3>' + esc(mdHeader[1]) + '</h3>';
+      // Звичайний рядок — обробляємо **жирний** та *курсив*
+      let html = esc(t)
+        .replace(/\*\*(.+?)\*\*/g, '<strong style="color:#e5e7eb">$1</strong>')
+        .replace(/\*(.+?)\*/g, '<em>$1</em>')
+        .replace(/^[-•]\s+/, '');
+      return '<p>' + html + '</p>';
     })
     .join('');
+}
+
+function esc(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
 // ─────────────────────────────────────────────
