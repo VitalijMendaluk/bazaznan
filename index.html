@@ -710,8 +710,8 @@ async function getAIResponse(userText) {
   let lastErr = null;
   for (const model of GEMINI_MODELS) {
     try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`;
-      const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+      const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': GEMINI_API_KEY }, body: JSON.stringify(body) });
       if (!res.ok) { const e = await res.json().catch(()=>({})); throw new Error(e.error?.message || `HTTP ${res.status}`); }
       const data = await res.json();
       text = data.candidates?.[0]?.content?.parts?.[0]?.text;
@@ -857,9 +857,11 @@ async function ask(text) {
     typing.remove();
     addBubble('ai', answer);
   } catch (err) {
+    // Якщо Gemini не відповідає — використовуємо локальну базу знань
+    console.warn('Gemini недоступний, використовую локальну базу:', err.message);
     typing.remove();
-    addBubble('ai', `⚠️ Помилка: ${err.message}\n\nПеревір підключення до інтернету або спробуй ще раз.`);
-    console.error('Gemini error:', err);
+    const localAnswer = findLocal(text);
+    addBubble('ai', localAnswer);
   } finally {
     busy = false;
     sendBtn.disabled = !input.value.trim();
