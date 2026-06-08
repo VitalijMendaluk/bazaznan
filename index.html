@@ -673,7 +673,7 @@ const FALLBACK = `[H]Відмінне питання![/H]
 //  Ключ: console.groq.com → API Keys → Create
 // ─────────────────────────────────────────────
 // API key is stored securely on the server (Vercel env vars)
-const GROQ_MODEL = 'llama-3.3-70b-versatile';
+const GROQ_MODELS = ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'meta-llama/llama-4-scout-17b-16e-instruct'];
 
 const SYSTEM_PROMPT = `Ти — AI-наставник Віталік, експерт з TikTok з 5+ роками практики. Ведеш наставництво для людей, які хочуть монетизувати TikTok з нуля. Відповідаєш ТІЛЬКИ українською мовою.
 
@@ -780,29 +780,38 @@ async function getAIResponse(userText) {
     ...history
   ];
 
-  const res = await fetch('/api/chat', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: GROQ_MODEL,
-      messages,
-      temperature: 0.4,
-      max_tokens: 600
-    })
-  });
+  let lastError = '';
+  for (const model of GROQ_MODELS) {
+    try {
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model, messages, temperature: 0.4, max_tokens: 600 })
+      });
 
-  if (!res.ok) {
-    history.pop();
-    const e = await res.json().catch(() => ({}));
-    throw new Error(e.error?.message || `HTTP ${res.status}`);
+      const data = await res.json();
+
+      if (data.error) {
+        lastError = data.error.message || 'Помилка API';
+        // rate limit — пробуємо наступну модель
+        if (data.error.code === 'rate_limit_exceeded' || res.status === 429) continue;
+        throw new Error(lastError);
+      }
+
+      const text = data.choices?.[0]?.message?.content;
+      if (!text) { lastError = 'Пуста відповідь'; continue; }
+
+      history.push({ role: 'assistant', content: text });
+      return text;
+    } catch(e) {
+      lastError = e.message || 'Помилка';
+      if (lastError.includes('rate_limit') || lastError.includes('429')) continue;
+      throw e;
+    }
   }
 
-  const data = await res.json();
-  const text = data.choices?.[0]?.message?.content;
-  if (!text) { history.pop(); throw new Error('Пуста відповідь від AI'); }
-
-  history.push({ role: 'assistant', content: text });
-  return text;
+  history.pop();
+  throw new Error('AI тимчасово перевантажений. Зачекай 1 хвилину і спробуй ще раз.');
 }
 
 // Локальний пошук — підтримує відмінювання через стеми
@@ -962,11 +971,14 @@ async function ask(text) {
     typing.remove();
     addBubble('ai', answer);
   } catch (err) {
-    // Якщо Gemini не відповідає — використовуємо локальну базу знань
-    console.warn('Gemini недоступний, використовую локальну базу:', err.message);
     typing.remove();
+    // Спробуємо локальну базу
     const localAnswer = findLocal(text);
-    addBubble('ai', localAnswer);
+    if (localAnswer !== FALLBACK) {
+      addBubble('ai', localAnswer);
+    } else {
+      addBubble('ai', `⚠️ ${err.message || 'Щось пішло не так. Спробуй ще раз.'}`);
+    }
   } finally {
     busy = false;
     sendBtn.disabled = !input.value.trim();
