@@ -672,8 +672,8 @@ const FALLBACK = `[H]Відмінне питання![/H]
 //  GROQ API (безкоштовно, 14400 запитів/день)
 //  Ключ: console.groq.com → API Keys → Create
 // ─────────────────────────────────────────────
-const GROQ_API_KEY = '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';
-const GROQ_MODEL   = 'llama-3.1-8b-instant';
+// API key is stored securely on the server (Vercel env vars)
+const GROQ_MODEL = 'llama-3.1-8b-instant';
 
 const SYSTEM_PROMPT = `Ти — AI-наставник Віталік, експерт з TikTok маркетингу з 10+ роками досвіду.
 Допомагаєш будувати успішні TikTok акаунти. Відповідаєш ТІЛЬКИ українською мовою.
@@ -698,13 +698,9 @@ async function getAIResponse(userText) {
     ...history
   ];
 
-  const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+  const res = await fetch('/api/chat', {
     method: 'POST',
-    mode: 'cors',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${GROQ_API_KEY}`
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model: GROQ_MODEL,
       messages,
